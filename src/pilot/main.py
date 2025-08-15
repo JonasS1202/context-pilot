@@ -129,13 +129,13 @@ def collect_project_files(
     return sorted(project_files)
 
 
-def count_tokens(text: str, model: str = "gpt-4") -> int:
+def count_tokens(text: str, model: str = "gpt-4", factor_to_gemini: float = 1.2) -> int:
     """Returns the number of tokens in a text string."""
     try:
         encoding = tiktoken.encoding_for_model(model)
     except KeyError:
         encoding = tiktoken.get_encoding("cl100k_base")
-    return len(encoding.encode(text))
+    return len(encoding.encode(text)) * factor_to_gemini
 
 
 # ── Prompt Builders ───────────────────────────────────────────────────
