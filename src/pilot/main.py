@@ -165,7 +165,7 @@ def make_full_context_prompt(task: str, tree: str, files: list[Path], root: Path
         "**Phase 0: Task Clarification**\n"
         "Your first and only action is to analyze the task description for any ambiguity, vagueness, or missing context.\n"
         "- If the task is perfectly clear and specific, respond *only* with the line: `✅ No questions left.`\n"
-        "- If you have any questions that would help you better understand the requirements, goals, or scope, ask them. Continue asking questions in subsequent turns until you are 100% confident. Once all your questions are answered, respond *only* with the line: `✅ No questions left.`\n"
+        "- If you have any questions that would help you better understand the requirements, goals, or scope, ask them. Continue asking questions in subsequent turns until you are 100% confident. Once all your questions are answered, respond with the line `✅ No questions left.` and then, **in the same message**, immediately proceed with **Phase 1**.\n"
         "Do not proceed to the next phase until you have sent this signal.\n\n"
         "**Phase 1: The Plan**\n"
         "After signaling you have no questions, respond *only* with a comprehensive, step-by-step plan. A perfect plan includes:\n"
