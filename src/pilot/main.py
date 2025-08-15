@@ -198,8 +198,10 @@ def make_discovery_prompt(task: str, tree: str) -> str:
         "Your mission is to clarify the task, gather sufficient information to create a flawless plan, and only then, execute that plan. You must follow the phases below without deviation.\n\n"
         "**Phase 0: Information Gathering (Your first and only action)**\n"
         "1.  **Analyze the Structure:** Review the folder structure to form hypotheses about the project's architecture. Identify potential files of interest.\n"
-        "2.  **Request Files Incrementally:** To test your hypotheses, request file contents a few at a time using this exact command on its own line:\n"
-        "    `pilot files path/to/file.py`\n"
+        "2.  **Iterative Reconnaissance:** Embody your role as a Principal Engineer. Your first action is a broad reconnaissance: based on the task and file tree, request the initial collection of key files you need for a foundational understanding. It is expected that this first request will be for multiple files.\n"
+        "    After reviewing these files, you must continue this process, making additional, more targeted requests in subsequent turns until you are confident you have all the information needed to solve the task.\n"
+        "    **Command Syntax:**\n"
+        "    `pilot files path/to/file_a.py path/to/file_b.py ...`\n"
         "3.  **Never Assume:** As a meticulous engineer, you must verify every assumption. If you are unsure about something, request the relevant file. Do not proceed with incomplete information.\n"
         "4.  **Signal Completion:** Once you have requested all the files you need, you must start your *next* response with the line `✅ I have enough information.` and then immediately begin Phase 1 in the same message.\n\n"
         "**Phase 1: Task Clarification**\n"
@@ -325,11 +327,14 @@ def main() -> None:
                 pass
         
         estimated_token_count = count_tokens(full_context)
+
         if estimated_token_count < args.threshold:
             print("✅ Project fits in context window. Generating full-context prompt.")
             prompt = make_full_context_prompt(args.task, tree, project_files, root)
         else:
             print("⚠️ Project is large. Generating interactive 'Guided Discovery' prompt.")
+            print(f"⚠️ Full context mode would have had {estimated_token_count:,} tokens.")
+
             prompt = make_discovery_prompt(args.task, tree)
         print(f"📊 Estimated token count: {count_tokens(prompt):,}")
     
