@@ -44,10 +44,6 @@ except ImportError:
 DEFAULT_IGNORE_DIRS = [".git", "venv", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist", ".eggs"]
 DEFAULT_IGNORE_FILES: List[str] = ["pilot.py", "chatgpt_prompt.txt"]
 DEFAULT_ONLY_FROM_DIRS: Optional[List[str]] = None
-
-# Context window threshold in tokens. If the project exceeds this,
-# it will switch to the interactive "Guided Discovery" mode.
-CONTEXT_THRESHOLD = 100_000
 # ──────────────────────────────────────────────────────────────────────
 
 
@@ -276,6 +272,12 @@ def make_git_prompt(staged_only: bool = False) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="pilot", description="An intelligent context manager for AI assistants.")
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="Project root (default: cwd)")
+    parser.add_argument(
+        "--threshold", 
+        type=int, 
+        default=1_000_000, 
+        help="Token count threshold to switch to interactive mode (default: 1,000,000)."
+    )
     sub = parser.add_subparsers(dest="mode", required=True, metavar="{assist,files,git}")
 
     # --- Assist Mode ---
@@ -323,7 +325,7 @@ def main() -> None:
                 pass
         
         estimated_token_count = count_tokens(full_context)
-        if estimated_token_count < CONTEXT_THRESHOLD:
+        if estimated_token_count < args.threshold:
             print("✅ Project fits in context window. Generating full-context prompt.")
             prompt = make_full_context_prompt(args.task, tree, project_files, root)
         else:
