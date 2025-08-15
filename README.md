@@ -35,7 +35,7 @@ You can install `ContextPilot` directly from the GitHub repository. You will als
 
 ```bash
 # Install the tool and its dependencies in one go
-pip install "pip install git+https://github.com/JonasS1202/context-pilot.git"
+"pip install git+https://github.com/JonasS1202/context-pilot.git"
 ```
 
 *Note: Ensure Git is installed and accessible in your system's PATH.*

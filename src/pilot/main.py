@@ -42,7 +42,7 @@ except ImportError:
 # ── CONFIGURATION ───────────────────────────────────────────────────
 # Default directories to ignore. For best results, rely on a project's .gitignore file.
 DEFAULT_IGNORE_DIRS = [".git", "venv", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist", ".eggs"]
-DEFAULT_IGNORE_FILES: List[str] = ["pilot.py", "chatgpt_prompt.txt"]
+DEFAULT_IGNORE_FILES: List[str] = ["pilot.py", "prompt.txt"]
 DEFAULT_ONLY_FROM_DIRS: Optional[List[str]] = None
 # ──────────────────────────────────────────────────────────────────────
 
@@ -285,19 +285,19 @@ def main() -> None:
     # --- Assist Mode ---
     p_assist = sub.add_parser("assist", help="Intelligently build context for a given task.")
     p_assist.add_argument("task", type=str, help="The high-level task for the AI assistant.")
-    p_assist.add_argument("-o", "--output", type=Path, default="chatgpt_prompt.txt")
+    p_assist.add_argument("-o", "--output", type=Path, default="prompt.txt")
     p_assist.add_argument("-c", "--copy", action="store_true", help="Copy the prompt to the clipboard.")
     p_assist.add_argument("--ext", nargs="+", default=[".py", ".toml", ".yaml", ".json", ".md", ".sh", ".txt"], help="File extensions to include.")
     
     # --- Files Mode ---
     p_files = sub.add_parser("files", help="Provide specific files to the AI during an interactive session.")
     p_files.add_argument("files", nargs="+", type=Path, help="File paths relative to --root.")
-    p_files.add_argument("-o", "--output", type=Path, default="chatgpt_prompt.txt")
+    p_files.add_argument("-o", "--output", type=Path, default="prompt.txt")
     p_files.add_argument("-c", "--copy", action="store_true", help="Copy the prompt to the clipboard.")
 
     # --- Git Mode ---
     p_git = sub.add_parser("git", help="Generate a prompt to suggest commit messages.")
-    p_git.add_argument("-o", "--output", type=Path, default="chatgpt_prompt.txt")
+    p_git.add_argument("-o", "--output", type=Path, default="prompt.txt")
     p_git.add_argument("-c", "--copy", action="store_true", help="Copy the prompt to the clipboard.")
     p_git.add_argument("--staged", action="store_true", help="Analyze only staged changes.")
 
