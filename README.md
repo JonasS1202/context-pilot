@@ -1,16 +1,6 @@
-\<div align="center"\>
-
 # 🚀 ContextPilot
 
 **An intelligent context manager for AI assistants.**
-
-\</div\>
-
-\<p align="center"\>
-\<img src="[https://img.shields.io/badge/Python-3.7+-blue.svg](https://www.google.com/search?q=https://img.shields.io/badge/Python-3.7%2B-blue.svg)" alt="Python Version"\>
-\<img src="[https://img.shields.io/badge/License-MIT-green.svg](https://www.google.com/search?q=https://img.shields.io/badge/License-MIT-green.svg)" alt="License"\>
-\<img src="[https://img.shields.io/badge/Version-1.0.0-informational.svg](https://www.google.com/search?q=https://img.shields.io/badge/Version-1.0.0-informational.svg)" alt="Version"\>
-\</p\>
 
 `ContextPilot` is a command-line tool that bridges the gap between your local development environment and your AI assistant. It intelligently gathers and formats project context, ensuring your AI has the right information to perform complex coding tasks efficiently.
 
