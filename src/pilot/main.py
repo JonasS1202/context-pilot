@@ -312,22 +312,23 @@ def main() -> None:
             except Exception:
                 pass
         
-        token_count = count_tokens(full_context)
-        print(f"📊 Estimated token count: {token_count:,}")
-
-        if token_count < CONTEXT_THRESHOLD:
+        estimated_token_count = count_tokens(full_context)
+        if estimated_token_count < CONTEXT_THRESHOLD:
             print("✅ Project fits in context window. Generating full-context prompt.")
             prompt = make_full_context_prompt(args.task, tree, project_files, root)
         else:
             print("⚠️ Project is large. Generating interactive 'Guided Discovery' prompt.")
             prompt = make_discovery_prompt(args.task, tree)
+        print(f"📊 Estimated token count: {count_tokens(prompt):,}")
     
     elif args.mode == "files":
         explicit_files = [(root / f).resolve() for f in args.files]
         prompt = make_files_prompt(explicit_files, root)
+        print(f"📊 Estimated token count: {count_tokens(prompt):,}")
 
     elif args.mode == "git":
         prompt = make_git_prompt(staged_only=args.staged)
+        print(f"📊 Estimated token count: {count_tokens(prompt):,}")
 
     # --- Output ---
     if args.copy:
