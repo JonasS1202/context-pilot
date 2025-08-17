@@ -28,6 +28,10 @@ Source Material/Knowledge Base: [Specify the domain of knowledge the LLM should 
 
 Objective: [State the primary goal of this prompt in a single, clear sentence. E.g., "The objective is to generate a comprehensive investment thesis for a publicly traded company."]
 
+Stakes/Importance: [Explain why this task is important. What are the consequences of success or failure? E.g., "This analysis will determine the go/no-go decision for a $10M product launch."]
+
+Key Problem Statement: [Describe the core tension or central question that needs to be solved. E.g., "We have a superior product but zero brand recognition in the EU market, and a 6-month window to capture market share before a competitor launches."]
+
 R - ROLE:
 
 Persona: [Define a hyper-specific expert persona for the LLM. Go beyond a simple title. Example: "You are a Nobel Prize-winning physicist specializing in string theory, with a unique talent for explaining complex topics to university-level students." This should be tailored to the [PROMPT TOPIC OR THEME].]
@@ -36,7 +40,13 @@ Core Competencies: [List 3-5 key skills this persona possesses. E.g., "Quantitat
 
 Mindset/Tone: [Describe the persona's voice and attitude. E.g., "Your tone should be authoritative yet encouraging, scholarly but not pedantic. You are a mentor guiding a brilliant protégé."]
 
+Guiding Principles/Mental Models: [Define the philosophical framework for the persona's thinking. E.g., "You operate from First Principles. You apply Occam's Razor to choose the simplest of two competing hypotheses."]
+
+Epistemological Stance: [Define how the persona knows what it knows. E.g., "Strict empiricist: you only make claims supported by verifiable data.", "Systems thinker: you prioritize the interconnectedness of components."]
+
 A - ACTION:
+
+Confirmation & Clarification Protocol (Step 0): Before executing the main action steps, you must first analyze the entire prompt. If all instructions are clear and sufficient, state: "Protocol complete. All instructions are clear. Commencing action sequence." and proceed. If there is ambiguity or missing critical information, you MUST ask a targeted clarifying question before proceeding.
 
 Execution Steps: [Provide a numbered, sequential list of tasks the LLM must perform. This is the core of the prompt. Be explicit. Example:]
 
@@ -50,11 +60,15 @@ Synthesize your findings into a set of 3-5 key recommendations.
 
 Conclude with a paragraph outlining potential risks and future outlook.
 
+For highly complex tasks, consider including a self-correction loop, e.g., "After completing step 3, review your work against the Cognitive Constraints and state any adjustments made.
+
 F - FORMAT:
 
-Output Structure: [Define the exact structure of the response. E.g., "Format the entire response in Markdown. Use H1 for the main title, H2 for major sections (Analysis, Recommendations, Risks), and bullet points for lists."]
+Output Structure: [Define the exact structure of the response. E.g., "Format the entire response in Markdown. Use H1 for the main title..."] The entire final output must be enclosed in a single Markdown code block starting with ```markdown and ending with ```.
 
 Formatting Elements: [Specify any other formatting requirements. E.g., "Bold key terms. Use LaTeX for all mathematical equations. Present numerical data in a table with columns for [X, Y, Z]."]
+
+Data Presentation: [Specify how to display data. E.g., "All numerical comparisons must be presented in a Markdown table with clearly labeled columns. Timelines must be represented as a Mermaid chart."]
 
 Language & Style: [Specify the language, reading level, and stylistic conventions. E.g., "English (US), professional business writing style, active voice, 12th-grade reading level."]
 
@@ -66,9 +80,15 @@ Prior Knowledge: [What does the audience already know? What do they not know? E.
 
 Desired Outcome for Audience: [What should the audience think, feel, or do after consuming the content? E.g., "They should feel confident and informed enough to make a strategic decision."]
 
+Potential Objections/Concerns: [What is the audience likely to be skeptical about? E.g., "They will likely be concerned about implementation costs and integration challenges. Proactively address these by framing them with potential mitigations."]
+
+Audience Disposition: [Describe the audience's likely emotional state or attitude. E.g., "Highly skeptical and data-driven.", "Optimistic but needs reassurance on risks.", "Time-poor and requires the key takeaway in the first sentence."]
+
 E - EXEMPLARS:
 
 High-Quality Example (Few-Shot): [Provide a concise, powerful example of the desired output style or content. This is crucial for calibration. E.g., "Here is a sample recommendation to guide you: 'Recommendation 1: We should immediately divest from Project Alpha due to its 75% budget overrun and pivot resources to Project Beta, which shows a 3x ROI potential in initial simulations.'"]
+
+Low-Quality Example (Negative): [Provide a concise example of what to AVOID. E.g., "AVOID THIS: 'Making the power core better would be a good idea because it would probably save energy.'"]
 
 R - RESTRICTIONS:
 
@@ -76,4 +96,8 @@ Negative Constraints: [Explicitly state what the LLM should AVOID. E.g., "Do not
 
 Scope Limitation: [Define the boundaries of the task. E.g., "Focus the analysis only on the North American market. Do not discuss regulatory issues outside of the United States."]
 
+Cognitive Constraints: [Enforce intellectual honesty. E.g., "If critical data is unavailable from your knowledge base, you must state what is missing and explain how it impacts your conclusion. Do not invent or assume data."]
+
 Length: [Specify the desired length or word count. E.g., "The final output should be approximately 800-1200 words."]
+
+Forbidden Concepts/Topics: [Explicitly list any topics, entities, or data points to be completely avoided. E.g., "Do not discuss Project Chimera or any Q3 2024 financial projections."]
