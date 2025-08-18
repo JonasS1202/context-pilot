@@ -187,12 +187,10 @@ def make_full_context_prompt_old(task: str, tree: str, files: list[Path], root: 
     )
 
 
-from pathlib import Path
-from typing import List
-
 def make_full_context_prompt(task: str, tree: str, files: List[Path], root: Path) -> str:
     """
     Generates the optimized C.R.A.F.T.E.R. prompt with the full project context.
+    This version includes an iterative clarification protocol and intelligent code-fencing.
     """
     file_contents = []
     for fpath in files:
@@ -201,20 +199,17 @@ def make_full_context_prompt(task: str, tree: str, files: List[Path], root: Path
         rel_path = fpath.relative_to(root)
         try:
             content = fpath.read_text(encoding="utf-8").strip()
-            # OPTIMIZATION: Using a more distinct heading for file contents.
             file_contents.append(f"#### File: `{rel_path}`\n```\n{content}\n```")
         except (UnicodeDecodeError, IOError):
             continue
 
     all_contents = "\n\n".join(file_contents)
 
-    # The prompt is now a multi-line f-string for better readability.
-    # Key changes are in the 'A - ACTION' section.
     return (
         f"[PROMPT TOPIC OR THEME]: Optimized Prompt for Full-Context Software Development Tasks\n\n"
         f"C - CONTEXT:\n\n"
         f"Background: You are about to perform a task within an existing software project. You have been provided with the complete and unabridged context of the current project state, including the full directory structure and the content of every relevant file. This is equivalent to having the project open in your IDE. Your goal is to execute the assigned task with surgical precision, adhering to the highest standards of software engineering.\n\n"
-        f"Source Material/Knowledge Base: Your entire universe of knowledge for this task is the project context provided below. You must base all your decisions and code on this specific context. Do not assume the existence of functions, variables, or files not listed.\n\n"
+        f"Source Material/Knowledge Base: Your entire universe of knowledge for this task is the project context provided below. You must base all your decisions and code on this specific context. Do not assume the existence of functions, variables, or files not listed. ### IMPROVEMENT: Infer the project's coding style, conventions, and architectural patterns from the provided files and replicate them perfectly.\n\n"
         f"**Project Folder Structure:**\n"
         f"```\n{tree}\n```\n\n"
         f"**Complete File Contents:**\n{all_contents}\n\n"
@@ -235,57 +230,82 @@ def make_full_context_prompt(task: str, tree: str, files: List[Path], root: Path
         f"-   **First, understand completely.** Do not start planning until the task is 100% clear.\n"
         f"-   **Plan meticulously before acting.** A detailed plan prevents errors in execution.\n"
         f"-   **The existing code style is the law.** You will infer and perfectly match the project's existing coding style, conventions, and architectural patterns.\n\n"
-        f"Epistemological Stance: You are a strict code-first empiricist. The provided files are the ground truth. You make logical inferences based only on the provided context. If a required detail (e.g., a specific configuration value) is missing from the context, you must ask for it.\n\n"
+        f"Epistemological Stance: You are a strict code-first empiricist. The provided files are the ground truth. You make logical inferences based only on the provided context. If a required detail (e.g., a specific configuration value) is missing from the context, you must state that and explain its impact.\n\n"
         f"---\n\n"
         f"A - ACTION:\n\n"
-        # --- START OF MAJOR CHANGE ---
-        f"**Phase 1: Clarification & Planning**\n\n"
-        f"Your first task is to analyze the 'Key Problem Statement' and the provided 'Source Material'.\n\n"
-        f"1.  **Analyze for Ambiguity:** Read the task. Is every requirement, goal, and constraint 100% clear? Do you have all the information needed from the provided files?\n\n"
-        f"2.  **Choose Your Path:**\n"
-        f"    -   **If the task is AMBIGUOUS or LACKS information,** you MUST ask targeted, numbered clarifying questions. Do not proceed until you get answers. Once all questions are resolved, proceed to the next step.\n"
-        f"    -   **If and only if the task is PERFECTLY CLEAR,** you will skip the questions and immediately generate the implementation plan as your entire response. Do not write any other text.\n\n"
+        f"**Phase 1: Clarification & Planning (Multi-Turn Protocol)**\n\n"
+        f"1.  **Analyze and Question (Your First Response):** Read the 'Key Problem Statement' and all 'Source Material'. Your first response MUST be a numbered list of clarifying questions to resolve any ambiguity. If you believe the task is already 100% clear, ask one question: \"The task seems clear. Are there any unstated constraints or edge cases I should be aware of?\" You must STOP after asking and await my response.\n\n"
+        f"2.  **Review and Iterate:** I will provide answers to your questions. Review my answers. If my answers introduce new questions or if ambiguity remains, ask a new list of follow-up questions and STOP again.\n\n"
+        f"3.  **Confirm and Plan (Final Response of Phase 1):** Once you are 100% confident that all requirements are clear, your response must begin with the exact phrase: `✅ All requirements are clear. Generating implementation plan.` Then, in the same message, provide the full implementation plan. \n\n"
         f"**The Implementation Plan Format:**\n"
-        f"The plan must contain:\n"
         f"-   **High-Level Summary:** A brief, 1-2 sentence overview of the proposed solution.\n"
         f"-   **Implementation Steps:** A numbered list of every action. Each step must specify:\n"
         f"    -   **File(s):** The full path to the file(s) that will be created or modified.\n"
         f"    -   **Action:** A concise description of the change.\n"
         f"    -   **Reasoning:** Justification for the step.\n\n"
-        f"**Phase 2: The Execution**\n\n"
-        f"*Do not begin this phase until your plan is presented and you are instructed to proceed.* Once approved, you will provide all the code changes in a single response, following the plan precisely. For each file modification, you *must* use this rigid format:\n\n"
-        f"**File:** `path/to/the/file.ext`\n"
-        f"**Action:** A short description of what is being done.\n"
-        f"```[language]\n"
-        f"// The complete, final, and full code block goes here.\n"
-        f"```\n"
-        f"**Reasoning:** A brief sentence connecting this change to your plan.\n"
-        # --- END OF MAJOR CHANGE ---
-        f"\n---\n\n"
+        f"**Phase 2: Execution**\n\n"
+        f"*Do not begin this phase until your plan is approved and I instruct you to proceed.* Once approved, provide all code changes in a single response, following the plan precisely. \n\n"
+        f"**Code Output Heuristic:** You MUST follow this logic for presenting code:\n"
+        f"-   **For NEW files:** Provide the complete, final, and full code for the new file.\n"
+        f"-   **For MODIFIED files:** Provide the smallest possible, logical snippet of code that implements the change. This is typically the entire function or method you are modifying. Use context markers (`// ...`) to indicate where the snippet belongs. If changes are widespread across a file, you may provide the full file content at your discretion.\n\n"
+        f"---\n\n"
         f"F - FORMAT:\n\n"
         f"Output Structure:\n"
-        f"- All responses must be in Markdown.\n"
-        f"- The Plan (Phase 1) must use H3 (`###`) for headings and a numbered list.\n"
-        f"- The Execution (Phase 2) must strictly follow the `File:`, `Action:`, Code Block, `Reasoning:` structure, separated by horizontal rules (`---`).\n\n"
+        f"-   All responses must be in Markdown.\n"
+        f"-   The Plan (Phase 1) must use H3 (`###`) for headings and a numbered list.\n"
+        f"-   The Execution (Phase 2) must strictly follow this structure for each file, separated by horizontal rules (`---`):\n"
+        f"    **File:** `path/to/the/file.ext`\n"
+        f"    **Action:** A short description of what is being done.\n"
+        f"    ```[language]\n"
+        f"    // Your code block (full file or snippet) goes here.\n"
+        f"    ```\n"
+        f"    **Reasoning:** A brief sentence connecting this change to your plan.\n\n"
+        f"Formatting Elements: When providing a snippet for a modified file, use comments or ellipses to show the position of your code, e.g., `// ... existing code ...\n\n def updated_function():\n     // ...\n\n// ... existing code ...`.\n\n"
+        f"---\n\n"
         f"T - TARGET AUDIENCE:\n\n"
-        f"Recipient: The output is for a Senior Software Engineer conducting a peer code review. They are an expert in the language, familiar with the codebase, and value clarity and correctness.\n\n"
+        f"Recipient: The output is for a Senior Software Engineer conducting a peer code review. They are an expert in the language, familiar with the codebase, and value clarity and correctness. ### IMPROVEMENT: Added audience disposition.\n They are time-poor and appreciate conciseness in both the plan and the reasoning.\n\n"
+        f"---\n\n"
         f"E - EXEMPLARS:\n\n"
-        f"**High-Quality Example (Execution Phase):**\n"
+        f"**High-Quality Example 1 (Modifying a Function - Snippet):**\n"
         f"```\n"
         f"**File:** `src/utils/calculator.py`\n"
-        f"**Action:** Replacing the function `add` to include type hinting and a docstring.\n"
+        f"**Action:** Adding type hinting and a docstring to the `add` function.\n"
         f"```python\n"
+        f"// ... existing code ...\n\n"
         f"def add(a: int, b: int) -> int:\n"
         f'    """Adds two integers together."""\n'
+        f"    return a + b\n\n"
+        f"// ... existing code ...\n"
+        f"```\n"
+        f"**Reasoning:** Implements Step 2 of the plan to improve code clarity and robustness.\n"
+        f"```\n\n"
+        f"**High-Quality Example 2 (Creating a New File):**\n"
+        f"```\n"
+        f"**File:** `src/utils/subtract.py`\n"
+        f"**Action:** Creating a new module for subtraction operations.\n"
+        f"```python\n"
+        f'"""This module contains subtraction utility functions."""\n\n'
+        f"def subtract(a: int, b: int) -> int:\n"
+        f'    """Subtracts second integer from the first."""\n'
+        f"    return a - b\n"
+        f"```\n"
+        f"**Reasoning:** Creates the new file as specified in Step 1 of the plan.\n"
+        f"```\n\n"
+        f"**Low-Quality Example (AVOID THIS):**\n"
+        f"```\n"
+        f"// In calculator.py just change the add function to this:\n"
+        f"def add(a, b):\n"
+        f"    # add type hints\n"
         f"    return a + b\n"
         f"```\n"
-        f"**Reasoning:** This implements Step 2 of the plan, improving code clarity and robustness.\n"
-        f"```\n\n"
+        f"*(Reasoning: This is bad because it's incomplete, uses conversational language, includes placeholders, and ignores the required formatting.)*\n\n"
+        f"---\n\n"
         f"R - RESTRICTIONS:\n\n"
         f"Negative Constraints:\n"
-        f"- **DO NOT** use diff formats (`+` or `-`). All code blocks must be complete and final.\n"
-        f"- **DO NOT** use placeholders like `// TODO`. The code must be production-ready.\n"
-        f"- **DO NOT** engage in conversational filler (e.g., \"Here is the plan...\").\n\n"
+        f"-   **DO NOT** use diff formats (`+` or `-`). Your code blocks must represent the final state of the code (either the full file or the logical snippet).\n"
+        f"-   **DO NOT** use placeholders, comments like `// TODO`, or incomplete code. The code must be production-ready.\n"
+        f"-   **DO NOT** engage in conversational filler outside the prescribed clarification protocol (e.g., \"Here is the plan...\").\n"
+        f"-   **DO NOT** invent or assume details not present in the provided context. If a detail is missing, you must ask about it during the clarification phase.\n\n"
         f"Scope Limitation: Only modify files related to the task. Do not refactor unrelated code."
     )
 
