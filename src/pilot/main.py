@@ -1,85 +1,68 @@
 #!/usr/bin/env python3
 """
 ContextPilot – An intelligent context manager for AI assistants.
-
-Usage
------
-
-# 1. The main "assist" command (Recommended)
-#    Automatically builds the best prompt based on project size.
-pilot assist "Refactor the authentication logic to use a service class." [--ext .py .toml]
-
-# 2. The "files" command (for interactive sessions)
-#    Used after the AI requests specific files in a large project.
-pilot files src/main.py src/utils.py
-
-# 3. The "git" command (for commit messages)
-#    Generates a prompt to suggest commit messages for staged/unstaged changes.
-pilot git
 """
 from __future__ import annotations
 
 import argparse
-import os
 import sys
-from pathlib import Path
-from typing import List, Optional
 import subprocess
-from collections import defaultdict
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List
 
-# Third-party libraries (pip install tiktoken pyperclip)
+# Third-party libraries (pip install tiktoken pyperclip pathspec)
 try:
     import pyperclip
     import tiktoken
+    import pathspec
 except ImportError:
     print(
-        "Error: Required packages not found. Please run 'pip install tiktoken pyperclip'",
+        "Error: Required packages not found. Please run 'pip install tiktoken pyperclip pathspec'",
         file=sys.stderr,
     )
     sys.exit(1)
 
+# Local imports
+from . import prompts
 
 # ── CONFIGURATION ───────────────────────────────────────────────────
-# Default directories to ignore. For best results, rely on a project's .gitignore file.
 DEFAULT_IGNORE_DIRS = [".git", "venv", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist", ".eggs"]
-DEFAULT_IGNORE_FILES: List[str] = ["pilot.py", "prompt.txt"]
-DEFAULT_ONLY_FROM_DIRS: Optional[List[str]] = None
-# ──────────────────────────────────────────────────────────────────────
+DEFAULT_IGNORE_FILES: List[str] = ["pilot.py", "prompt.txt", "prompts.py"]
+TOKEN_CONVERSION_FACTOR = 1.28
 
+# ── DATA STRUCTURES ─────────────────────────────────────────────────
+@dataclass
+class AppConfig:
+    """Encapsulates application configuration and shared state."""
+    root: Path
+    args: argparse.Namespace
+    ignore_spec: pathspec.PathSpec = field(init=False)
+
+    def __post_init__(self):
+        """Load ignore patterns after initialization."""
+        gitignore_path = self.root / ".gitignore"
+        ignore_patterns = DEFAULT_IGNORE_DIRS + DEFAULT_IGNORE_FILES
+        if hasattr(self.args, 'output') and self.args.output:
+            ignore_patterns.append(self.args.output.name)
+
+        if gitignore_path.is_file():
+            with gitignore_path.open("r", encoding="utf-8") as f:
+                ignore_patterns.extend(f.read().splitlines())
+        
+        self.ignore_spec = pathspec.PathSpec.from_lines('gitwildmatch', ignore_patterns)
+
+    def is_ignored(self, path: Path) -> bool:
+        """Check if a path should be ignored based on the loaded spec."""
+        # pathspec works with relative paths
+        relative_path = path.relative_to(self.root) if path.is_absolute() else path
+        return self.ignore_spec.match_file(relative_path)
 
 # ── Path & Git Helpers ────────────────────────────────────────────────
-def _is_ignored(p: Path, root: Path, ignore_dirs: list[Path], ignore_files: list[Path]) -> bool:
-    """Check if a path should be ignored."""
-    rel = p.relative_to(root)
-    # NOTE: For a more robust solution, use the `pathspec` library to parse .gitignore
-    is_dir_ignored = any(part in [ign.name for ign in ignore_dirs] for part in rel.parts)
-    is_file_ignored = any(rel.name == ign.name for ign in ignore_files)
-    return is_dir_ignored or is_file_ignored
-
-def _in_scope_dir(p: Path, root: Path, only_from: Optional[List[str]]) -> bool:
-    """Check if a path is within the desired scope."""
-    if only_from is None or p == root:
-        return True
-    top_level_dir = p.relative_to(root).parts[0] if p.relative_to(root).parts else ""
-    return top_level_dir in only_from
-
-def load_gitignore_patterns(root: Path) -> list[str]:
-    """Loads and cleans patterns from the .gitignore file."""
-    gitignore_path = root / ".gitignore"
-    if not gitignore_path.is_file():
-        return []
-    patterns = []
-    with open(gitignore_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                patterns.append(line.rstrip('/'))
-    return patterns
-
 def _run_git(cmd: list[str]) -> str:
     """Run a git command; exit gracefully on error."""
     try:
-        return subprocess.check_output(cmd, text=True, stderr=subprocess.PIPE)
+        return subprocess.check_output(cmd, text=True, stderr=subprocess.PIPE, cwd=Path.cwd())
     except FileNotFoundError:
         print("Error: 'git' command not found. Is Git installed and in your PATH?", file=sys.stderr)
         sys.exit(1)
@@ -87,279 +70,63 @@ def _run_git(cmd: list[str]) -> str:
         print(f"Error running git command: {e.stderr}", file=sys.stderr)
         return ""
 
-
-# ── Core Logic ────────────────────────────────────────────────────────
-def build_tree(root: Path, ignore_dirs: list[Path], ignore_files: list[Path], only_from: Optional[list[str]]) -> str:
+def build_tree(config: AppConfig) -> str:
     """Return an ASCII tree of the project structure."""
     lines = ["."]
     
     def walk(dir_path: Path, prefix: str = ""):
-        entries = sorted([p for p in dir_path.iterdir()], key=lambda x: (x.is_file(), x.name.lower()))
-        filtered_entries = [e for e in entries if not _is_ignored(e, root, ignore_dirs, ignore_files) and _in_scope_dir(e, root, only_from)]
+        # Filter out ignored directories before iterating
+        try:
+            entries = sorted(
+                [p for p in dir_path.iterdir() if not config.is_ignored(p)],
+                key=lambda x: (x.is_file(), x.name.lower())
+            )
+        except PermissionError:
+            return # Skip directories we can't read
 
-        for i, entry in enumerate(filtered_entries):
-            connector = "└── " if i == len(filtered_entries) - 1 else "├── "
+        for i, entry in enumerate(entries):
+            connector = "└── " if i == len(entries) - 1 else "├── "
             lines.append(f"{prefix}{connector}{entry.name}")
             if entry.is_dir():
-                extension = "    " if i == len(filtered_entries) - 1 else "│   "
+                extension = "    " if i == len(entries) - 1 else "│   "
                 walk(entry, prefix + extension)
 
-    walk(root)
+    walk(config.root)
     return "\n".join(lines)
 
 
-def collect_project_files(
-    root: Path,
-    ignore_dirs: list[Path],
-    ignore_files: list[Path],
-    only_from: Optional[list[str]],
-    extensions: list[str],
-) -> list[Path]:
+def collect_project_files(config: AppConfig) -> list[Path]:
     """Collect all project files matching the given extensions."""
     project_files = []
-    for dirpath, _, filenames in os.walk(root):
-        d_path = Path(dirpath)
-        if _is_ignored(d_path, root, ignore_dirs, ignore_files) or not _in_scope_dir(d_path, root, only_from):
-            continue
-        for fname in filenames:
-            if any(fname.endswith(ext) for ext in extensions):
-                fpath = d_path / fname
-                if not _is_ignored(fpath, root, ignore_dirs, ignore_files):
-                    project_files.append(fpath)
+    for fpath in config.root.rglob("*"):
+        if fpath.is_file() and not config.is_ignored(fpath):
+            if any(fpath.name.endswith(ext) for ext in config.args.ext):
+                project_files.append(fpath)
     return sorted(project_files)
 
-
-def count_tokens(text: str, model: str = "gpt-4", factor_to_gemini: float = 1.28) -> int:
+# ── Token Counter ───────────────────────────────────────────────────
+def count_tokens(text: str, model: str = "gpt-4") -> int:
     """Returns the number of tokens in a text string."""
     try:
         encoding = tiktoken.encoding_for_model(model)
     except KeyError:
         encoding = tiktoken.get_encoding("cl100k_base")
-    return int(len(encoding.encode(text)) * factor_to_gemini)
-
+    return int(len(encoding.encode(text)) * TOKEN_CONVERSION_FACTOR)
 
 # ── Prompt Builders ───────────────────────────────────────────────────
-def make_full_context_prompt_old(task: str, tree: str, files: list[Path], root: Path) -> str:
-    """Generates a prompt with the full project context for smaller projects."""
-    file_contents = []
-    for fpath in files:
-        rel_path = fpath.relative_to(root)
-        try:
-            content = fpath.read_text(encoding="utf-8").strip()
-            file_contents.append(f"## `{rel_path}`:\n```\n{content}\n```")
-        except UnicodeDecodeError:
-            continue # Skip binary files
-
-    all_contents = "\n\n".join(file_contents)
-    return (
-        f"# Your Task\n{task}\n\n"
-        "You are a world-class Principal Software Engineer known for your meticulous attention to detail, clarity, and producing production-ready code. You have been given the complete context of a project and a task to perform.\n\n"
-        f"# Project Context\n\n## Folder Structure\n```\n{tree}\n```\n\n## File Contents\n{all_contents}\n\n"
-        "---\n"
-        "## Your Mission (Read Carefully)\n\n"
-        "Your mission is to execute the task by first clarifying all requirements, then creating a flawless plan, and finally implementing it perfectly. You must follow the phased process below without deviation.\n\n"
-        "**Phase 0: Task Clarification**\n"
-        "Your first and only action is to analyze the task description for any ambiguity, vagueness, or missing context.\n"
-        "- If the task is perfectly clear and specific, respond *only* with the line: `✅ No questions left.`\n"
-        "- If you have any questions that would help you better understand the requirements, goals, or scope, ask them. Continue asking questions in subsequent turns until you are 100% confident. Once all your questions are answered, respond with the line `✅ No questions left.` and then, **in the same message**, immediately proceed with **Phase 1**.\n"
-        "Do not proceed to the next phase until you have sent this signal.\n\n"
-        "**Phase 1: The Plan**\n"
-        "After signaling you have no questions, respond *only* with a comprehensive, step-by-step plan. A perfect plan includes:\n"
-        "1.  A **High-Level Summary** of your proposed solution.\n"
-        "2.  A numbered list of **Implementation Steps**. For each step, you must specify:\n"
-        "    -   The **Goal** of the step (e.g., \"Create a new service class for authentication\").\n"
-        "    -   The specific **File(s)** that will be created, modified, or deleted.\n"
-        "    -   A brief **Reasoning** for why this step is necessary.\n"
-        "**Do not write any code in the planning phase.**\n\n"
-        "**Phase 2: The Execution**\n"
-        "After presenting the plan, you will execute it. You must address each step from your plan one by one. For every file modification, you *must* use the following rigid format:\n\n"
-        "**File:** `path/to/the/file.ext`\n"
-        "**Action:** [Create file | Replace function `function_name` | Add after line X | Delete lines A-B]\n"
-        "```python\n"
-        "// ... your complete, final code block goes here ...\n"
-        "```\n"
-        "**Reasoning:** [A brief sentence connecting this code to the plan.]\n\n"
-        "---\n\n"
-        "### GOLDEN RULES (Non-Negotiable)\n"
-        "1.  **Plan First, Then Code:** You must always provide the complete plan first.\n"
-        "2.  **No Diffs, No Patches:** All code blocks must be complete and final. Never use `+`/`-` prefixes.\n"
-        "3.  **Adhere to the Format:** The `File:`, `Action:`, `Code Block`, `Reasoning:` format is mandatory for all code changes."
-    )
-
-
 def make_full_context_prompt(task: str, tree: str, files: List[Path], root: Path) -> str:
-    """
-    Generates the optimized C.R.A.F.T.E.R. prompt with the full project context.
-    This version includes an iterative clarification protocol and intelligent code-fencing.
-    """
+    """Builds the file context and formats it with the main prompt template."""
     file_contents = []
     for fpath in files:
-        if fpath.is_dir():
-            continue
         rel_path = fpath.relative_to(root)
         try:
             content = fpath.read_text(encoding="utf-8").strip()
             file_contents.append(f"#### File: `{rel_path}`\n```\n{content}\n```")
-        except (UnicodeDecodeError, IOError):
+        except (UnicodeDecodeError, IOError) as e:
+            print(f"Warning: Could not read file {rel_path}: {e}", file=sys.stderr)
             continue
-
     all_contents = "\n\n".join(file_contents)
-
-    return (
-        f"[PROMPT TOPIC OR THEME]: Optimized Prompt for Full-Context Software Development Tasks\n\n"
-        f"C - CONTEXT:\n\n"
-        f"Background: You are about to perform a task within an existing software project. You have been provided with the complete and unabridged context of the current project state, including the full directory structure and the content of every relevant file. This is equivalent to having the project open in your IDE. Your goal is to execute the assigned task with surgical precision, adhering to the highest standards of software engineering.\n\n"
-        f"Source Material/Knowledge Base: Your entire universe of knowledge for this task is the project context provided below. You must base all your decisions and code on this specific context. Do not assume the existence of functions, variables, or files not listed. ### IMPROVEMENT: Infer the project's coding style, conventions, and architectural patterns from the provided files and replicate them perfectly.\n\n"
-        f"**Project Folder Structure:**\n"
-        f"```\n{tree}\n```\n\n"
-        f"**Complete File Contents:**\n{all_contents}\n\n"
-        f"Objective: The objective is to generate a complete, correct, and production-ready implementation for the specified task, following a rigorous planning and execution protocol.\n\n"
-        f"Stakes/Importance: The output will be treated as a pull request from a senior engineer. High-quality work will be merged directly into the main branch. Low-quality work, bugs, or deviations from the plan will break the build and delay the project. Meticulous attention to detail is paramount.\n\n"
-        f"Key Problem Statement: {task}\n\n"
-        f"---\n\n"
-        f"R - ROLE:\n\n"
-        f"Persona: You are a \"10x\" Principal Software Engineer & Systems Architect. You are not just a coder; you are a pragmatic and meticulous craftsman. Your code is clean, efficient, and easy for other expert engineers to understand and maintain. You have a deep understanding of software architecture, design patterns, and the importance of writing robust, scalable solutions.\n\n"
-        f"Core Competencies:\n"
-        f"1.  **Systems-Level Thinking:** You understand how a change in one file impacts the entire system.\n"
-        f"2.  **Pragmatic Problem Solving:** You choose the simplest, cleanest solution that robustly solves the problem.\n"
-        f"3.  **Clean Code Artistry:** You adhere strictly to principles like SOLID, DRY, and YAGNI (You Ain't Gonna Need It).\n"
-        f"4.  **Flawless Execution:** You write complete, production-ready code without placeholders or shortcuts.\n"
-        f"5.  **Crystal-Clear Communication:** Your plans and reasoning are unambiguous and easy for other engineers to follow.\n\n"
-        f"Mindset/Tone: Your tone is professional, confident, and authoritative. You are a senior peer collaborating with other experts. Your language is precise and economical. There is no conversational filler. You communicate through well-structured plans and perfect code.\n\n"
-        f"Guiding Principles/Mental Models:\n"
-        f"-   **First, understand completely.** Do not start planning until the task is 100% clear.\n"
-        f"-   **Plan meticulously before acting.** A detailed plan prevents errors in execution.\n"
-        f"-   **The existing code style is the law.** You will infer and perfectly match the project's existing coding style, conventions, and architectural patterns.\n\n"
-        f"Epistemological Stance: You are a strict code-first empiricist. The provided files are the ground truth. You make logical inferences based only on the provided context. If a required detail (e.g., a specific configuration value) is missing from the context, you must state that and explain its impact.\n\n"
-        f"---\n\n"
-        f"A - ACTION:\n\n"
-        f"**ACTION PROTOCOL**\n\n"
-        f"Your response will follow one of two paths based on the clarity of the task.\n\n"
-        f"**Path 1: Clarification Needed**\n"
-        f"1.  **Analyze and Question:** Read the 'Key Problem Statement' and all 'Source Material'. If any requirement is ambiguous or critical information is missing, your response MUST be a numbered list of clarifying questions.\n"
-        f"2.  **STOP and Await Answers:** Do not proceed further until I provide answers.\n"
-        f"3.  **Iterate if Necessary:** After I respond, if my answers introduce new ambiguities, you may ask for more clarification. You will continue this until you are 100% confident.\n\n"
-        f"**Path 2: Immediate Plan & Execution**\n"
-        f"If, and only if, the task is 100% clear (either initially or after a round of questions), you will generate a single, complete response containing both the plan and the full code execution.\n\n"
-        f"This complete response MUST be structured as follows:\n\n"
-        f"1.  **Confirmation:** Start the response with the exact phrase: `✅ All requirements are clear. Generating implementation plan.`\n\n"
-        f"2.  **The Implementation Plan:** Immediately following the confirmation, provide the plan in this format:\n"
-        f"    -   **High-Level Summary:** A brief, 1-2 sentence overview of the proposed solution.\n"
-        f"    -   **Implementation Steps:** A numbered list of every action. Each step must specify:\n"
-        f"        -   **File(s):** The full path to the file(s) that will be created or modified.\n"
-        f"        -   **Action:** A concise description of the change.\n"
-        f"        -   **Reasoning:** Justification for the step.\n\n"
-        f"3.  **The Code Execution:** Immediately following the plan, provide all the code changes, following the `F - FORMAT` and `Code Output Heuristic` precisely. There should be no text between the end of the plan and the start of the first code block.\n\n"
-        f"**Code Output Heuristic:** You MUST follow this logic for presenting code:\n"
-        f"-   **For NEW files:** Provide the complete, final, and full code for the new file.\n"
-        f"-   **For MODIFIED files:** Provide the smallest possible, logical snippet of code that implements the change. This is typically the entire function or method you are modifying. Use context markers (`// ...`) to indicate where the snippet belongs. If changes are widespread across a file, you may provide the full file content at your discretion.\n\n"
-        f"---\n\n"
-        f"F - FORMAT:\n\n"
-        f"Output Structure:\n"
-        f"-   All responses must be in Markdown.\n"
-        f"-   The Plan (Phase 1) must use H3 (`###`) for headings and a numbered list.\n"
-        f"-   The Execution (Phase 2) must strictly follow this structure for each file, separated by horizontal rules (`---`):\n"
-        f"    **File:** `path/to/the/file.ext`\n"
-        f"    **Action:** A short description of what is being done.\n"
-        f"    ```[language]\n"
-        f"    // Your code block (full file or snippet) goes here.\n"
-        f"    ```\n"
-        f"    **Reasoning:** A brief sentence connecting this change to your plan.\n\n"
-        f"Formatting Elements: When providing a snippet for a modified file, use comments or ellipses to show the position of your code, e.g., `// ... existing code ...\n\n def updated_function():\n     // ...\n\n// ... existing code ...`.\n\n"
-        f"---\n\n"
-        f"T - TARGET AUDIENCE:\n\n"
-        f"Recipient: The output is for a Senior Software Engineer conducting a peer code review. They are an expert in the language, familiar with the codebase, and value clarity and correctness. ### IMPROVEMENT: Added audience disposition.\n They are time-poor and appreciate conciseness in both the plan and the reasoning.\n\n"
-        f"---\n\n"
-        f"E - EXEMPLARS:\n\n"
-        f"**High-Quality Example 1 (Modifying a Function - Snippet):**\n"
-        f"```\n"
-        f"**File:** `src/utils/calculator.py`\n"
-        f"**Action:** Adding type hinting and a docstring to the `add` function.\n"
-        f"```python\n"
-        f"// ... existing code ...\n\n"
-        f"def add(a: int, b: int) -> int:\n"
-        f'    """Adds two integers together."""\n'
-        f"    return a + b\n\n"
-        f"// ... existing code ...\n"
-        f"```\n"
-        f"**Reasoning:** Implements Step 2 of the plan to improve code clarity and robustness.\n"
-        f"```\n\n"
-        f"**High-Quality Example 2 (Creating a New File):**\n"
-        f"```\n"
-        f"**File:** `src/utils/subtract.py`\n"
-        f"**Action:** Creating a new module for subtraction operations.\n"
-        f"```python\n"
-        f'"""This module contains subtraction utility functions."""\n\n'
-        f"def subtract(a: int, b: int) -> int:\n"
-        f'    """Subtracts second integer from the first."""\n'
-        f"    return a - b\n"
-        f"```\n"
-        f"**Reasoning:** Creates the new file as specified in Step 1 of the plan.\n"
-        f"```\n\n"
-        f"**Low-Quality Example (AVOID THIS):**\n"
-        f"```\n"
-        f"// In calculator.py just change the add function to this:\n"
-        f"def add(a, b):\n"
-        f"    # add type hints\n"
-        f"    return a + b\n"
-        f"```\n"
-        f"*(Reasoning: This is bad because it's incomplete, uses conversational language, includes placeholders, and ignores the required formatting.)*\n\n"
-        f"---\n\n"
-        f"R - RESTRICTIONS:\n\n"
-        f"Negative Constraints:\n"
-        f"-   **DO NOT** use diff formats (`+` or `-`). Your code blocks must represent the final state of the code (either the full file or the logical snippet).\n"
-        f"-   **DO NOT** use placeholders, comments like `// TODO`, or incomplete code. The code must be production-ready.\n"
-        f"-   **DO NOT** engage in conversational filler outside the prescribed clarification protocol (e.g., \"Here is the plan...\").\n"
-        f"-   **DO NOT** invent or assume details not present in the provided context. If a detail is missing, you must ask about it during the clarification phase.\n\n"
-        f"Scope Limitation: Only modify files related to the task. Do not refactor unrelated code."
-    )
-
-
-
-def make_discovery_prompt(task: str, tree: str) -> str:
-    """Generates the initial prompt for large projects, kicking off an interactive session."""
-    return (
-        f"# Your Task\n{task}\n\n"
-        "You are a world-class Principal Software Engineer known for your meticulous analysis and problem-solving skills. You are tasked with solving a problem in a large, unfamiliar codebase. You must clarify all requirements before gathering information.\n\n"
-        f"# Project Folder Structure\n```\n{tree}\n```\n\n"
-        "---\n"
-        "## Your Mission (Read Carefully)\n\n"
-        "Your mission is to clarify the task, gather sufficient information to create a flawless plan, and only then, execute that plan. You must follow the phases below without deviation.\n\n"
-        "**Phase 0: Information Gathering (Your first and only action)**\n"
-        "1.  **Analyze the Structure:** Review the folder structure to form hypotheses about the project's architecture. Identify potential files of interest.\n"
-        "2.  **Iterative Reconnaissance:** Embody your role as a Principal Engineer. Your first action is a broad reconnaissance: based on the task and file tree, request the initial collection of key files you need for a foundational understanding. It is expected that this first request will be for multiple files.\n"
-        "    After reviewing these files, you must continue this process, making additional, more targeted requests in subsequent turns until you are confident you have all the information needed to solve the task.\n"
-        "    **Command Syntax:**\n"
-        "    `pilot files path/to/file_a.py path/to/file_b.py ...`\n"
-        "3.  **Never Assume:** As a meticulous engineer, you must verify every assumption. If you are unsure about something, request the relevant file. Do not proceed with incomplete information.\n"
-        "4.  **Signal Completion:** Once you have requested all the files you need, you must start your *next* response with the line `✅ I have enough information.` and then immediately begin Phase 1 in the same message.\n\n"
-        "**Phase 1: Task Clarification**\n"
-        "After gathering files, analyze all the information against the task. Your response depends on your findings:\n"
-        "-   **If the task is unclear:** Ask specific, context-aware questions. Continue this process until you are satisfied.\n"
-        "-   **If the task is perfectly clear:** Start your response with the line `✅ No questions left.` and, in the same message, immediately proceed with **Phase 2: The Plan**.\n\n"
-        "**Phase 2: The Plan**\n\n"
-        "Immediately provide a comprehensive, step-by-step plan. A perfect plan includes:\n"
-        "    -   A **High-Level Summary** of your proposed solution.\n"
-        "    -   A numbered list of **Implementation Steps**. For each step, you must specify:\n"
-        "        -   The **Goal** of the step.\n"
-        "        -   The specific **File(s)** that will be created or modified.\n"
-        "        -   A brief **Reasoning** for why this step is necessary.\n"
-        "    **Do not write any code in the planning phase.**\n\n"
-        "**Phase 3: The Execution**\n\n"
-        "5.  **Execute the Plan:** After presenting the plan, you will execute it. You must address each step from your plan one by one. For every file modification, you *must* use the following rigid format:\n\n"
-        "**File:** `path/to/the/file.ext`\n"
-        "**Action:** [Create file | Replace function `function_name` | Add after line X]\n"
-        "```python\n"
-        "// ... your complete, final code block goes here ...\n"
-        "```\n"
-        "**Reasoning:** [A brief sentence connecting this code to the plan.]\n\n"
-        "---\n\n"
-        "### GOLDEN RULES (Non-Negotiable)\n"
-        "1.  **Gather, Plan, then Code:** You must follow the phases in order.\n"
-        "2.  **No Diffs, No Patches:** All code blocks must be complete and final. Never use `+`/`-` prefixes.\n"
-        "3.  **Adhere to the Format:** The `File:`, `Action:`, `Code Block`, `Reasoning:` format is mandatory for all code changes during execution."
-    )
-
+    return prompts.get_full_context_prompt(task, tree, all_contents)
 
 def make_files_prompt(files: list[Path], root: Path) -> str:
     """Generates a prompt containing only the content of specifically requested files."""
@@ -367,116 +134,68 @@ def make_files_prompt(files: list[Path], root: Path) -> str:
     for fpath in files:
         rel_path = fpath.relative_to(root)
         try:
+            # Ensure file exists before trying to read
+            if not fpath.is_file():
+                file_contents.append(f"## `{rel_path}`:\n```\nError: File not found at this path.\n```")
+                continue
             content = fpath.read_text(encoding="utf-8").strip()
             file_contents.append(f"## `{rel_path}`:\n```\n{content}\n```")
-        except (UnicodeDecodeError, FileNotFoundError):
-            file_contents.append(f"## `{rel_path}`:\n```\nError: Could not read this file.\n```")
-
-    return "\n\n".join(file_contents)
-
+        except (UnicodeDecodeError, IOError) as e:
+            file_contents.append(f"## `{rel_path}`:\n```\nError: Could not read this file: {e}\n```")
+    return prompts.get_files_prompt(file_contents)
 
 def make_git_prompt(staged_only: bool = False) -> str:
-    """Builds a prompt to suggest commit messages based on git diffs."""
+    """Gathers git diff and formats it with the git prompt template."""
     diff_cmd = ["git", "diff", "--no-color", "--unified=3"]
-    diff = _run_git(diff_cmd + ["--cached"])
+    diff = _run_git(diff_cmd + ["--cached"]) if staged_only else ""
     if not staged_only:
         diff += _run_git(diff_cmd)
+    return prompts.get_git_prompt(diff)
 
-    if not diff.strip():
-        return "No Git changes detected."
-
-    return (
-        f"## Full Git Diff\n```diff\n{diff}\n```\n\n"
-        "---\n"
-        "## Instructions\n\n"
-        "Analyze the git diff and suggest one or more commit messages in the Conventional Commits format. "
-        "Group related file changes into logical commits. Respond **only** with the commit plan in this exact format:\n\n"
-        "Commit 1:\n"
-        "files: path/to/file1.py path/to/file2.py\n"
-        "message: \"feat: add user authentication endpoint\"\n\n"
-        "Commit 2:\n"
-        "files: path/to/docs.md\n"
-        "message: \"docs: update API documentation for auth\"\n"
-    )
-
-# ── CLI Entrypoint ────────────────────────────────────────────────────
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="pilot", description="An intelligent context manager for AI assistants.")
-    parser.add_argument("--root", type=Path, default=Path.cwd(), help="Project root (default: cwd)")
-    parser.add_argument(
-        "--threshold", 
-        type=int, 
-        default=1_000_000, 
-        help="Token count threshold to switch to interactive mode (default: 1,000,000)."
-    )
-    sub = parser.add_subparsers(dest="mode", required=True, metavar="{assist,files,git}")
-
-    # --- Assist Mode ---
-    p_assist = sub.add_parser("assist", help="Intelligently build context for a given task.")
-    p_assist.add_argument("task", type=str, help="The high-level task for the AI assistant.")
-    p_assist.add_argument("-o", "--output", type=Path, default="prompt.txt")
-    p_assist.add_argument("-c", "--copy", action="store_true", help="Copy the prompt to the clipboard.")
-    p_assist.add_argument("--ext", nargs="+", default=[".py", ".toml", ".yaml", ".json", ".md", ".sh", ".txt"], help="File extensions to include.")
+# ── Command Handlers ───────────────────────────────────────────────────
+def handle_assist(config: AppConfig):
+    """Handler for the 'assist' command."""
+    print("🚀 Starting analysis...")
+    tree = build_tree(config)
+    project_files = collect_project_files(config)
+    print(f"🔍 Found {len(project_files)} relevant files.")
     
-    # --- Files Mode ---
-    p_files = sub.add_parser("files", help="Provide specific files to the AI during an interactive session.")
-    p_files.add_argument("files", nargs="+", type=Path, help="File paths relative to --root.")
-    p_files.add_argument("-o", "--output", type=Path, default="prompt.txt")
-    p_files.add_argument("-c", "--copy", action="store_true", help="Copy the prompt to the clipboard.")
-
-    # --- Git Mode ---
-    p_git = sub.add_parser("git", help="Generate a prompt to suggest commit messages.")
-    p_git.add_argument("-o", "--output", type=Path, default="prompt.txt")
-    p_git.add_argument("-c", "--copy", action="store_true", help="Copy the prompt to the clipboard.")
-    p_git.add_argument("--staged", action="store_true", help="Analyze only staged changes.")
-
-    args = parser.parse_args()
-    root: Path = args.root.resolve()
+    # Estimate token count for deciding which prompt to use
+    full_context_text = [tree, config.args.task]
+    for fpath in project_files:
+        try:
+            full_context_text.append(fpath.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, IOError):
+            pass # Silently ignore unreadable files for token counting
     
-    # --- Shared Setup ---
-    gitignore_patterns = load_gitignore_patterns(root)
-    ignore_dirs_names = DEFAULT_IGNORE_DIRS + gitignore_patterns
-    ignore_files_names = DEFAULT_IGNORE_FILES + [args.output.name]
-    ignore_dirs = [root / d for d in ignore_dirs_names]
-    ignore_files = [root / f for f in ignore_files_names]
+    estimated_token_count = count_tokens("\n".join(full_context_text))
 
-    prompt = ""
-    if args.mode == "assist":
-        print("🚀 Starting analysis...")
-        tree = build_tree(root, ignore_dirs, ignore_files, DEFAULT_ONLY_FROM_DIRS)
-        project_files = collect_project_files(root, ignore_dirs, ignore_files, DEFAULT_ONLY_FROM_DIRS, args.ext)
-        
-        print(f"🔍 Found {len(project_files)} relevant files.")
-        
-        full_context = tree + "\n" + args.task
-        for fpath in project_files:
-            try:
-                full_context += fpath.read_text(encoding="utf-8")
-            except Exception:
-                pass
-        
-        estimated_token_count = count_tokens(full_context)
-
-        if estimated_token_count < args.threshold:
-            print("✅ Project fits in context window. Generating full-context prompt.")
-            prompt = make_full_context_prompt(args.task, tree, project_files, root)
-        else:
-            print("⚠️ Project is large. Generating interactive 'Guided Discovery' prompt.")
-            print(f"⚠️ Full context mode would have had {estimated_token_count:,} tokens.")
-
-            prompt = make_discovery_prompt(args.task, tree)
-        print(f"📊 Estimated token count: {count_tokens(prompt):,}")
+    if estimated_token_count < config.args.threshold:
+        print("✅ Project fits in context window. Generating full-context prompt.")
+        prompt = make_full_context_prompt(config.args.task, tree, project_files, config.root)
+    else:
+        print("⚠️ Project is large. Generating interactive 'Guided Discovery' prompt.")
+        print(f"   (Full context would have been ~{estimated_token_count:,} tokens, threshold is {config.args.threshold:,})")
+        prompt = prompts.get_discovery_prompt(config.args.task, tree)
     
-    elif args.mode == "files":
-        explicit_files = [(root / f).resolve() for f in args.files]
-        prompt = make_files_prompt(explicit_files, root)
-        print(f"📊 Estimated token count: {count_tokens(prompt):,}")
+    output_prompt(prompt, config.args)
 
-    elif args.mode == "git":
-        prompt = make_git_prompt(staged_only=args.staged)
-        print(f"📊 Estimated token count: {count_tokens(prompt):,}")
+def handle_files(config: AppConfig):
+    """Handler for the 'files' command."""
+    explicit_files = [(config.root / f).resolve() for f in config.args.files]
+    prompt = make_files_prompt(explicit_files, config.root)
+    output_prompt(prompt, config.args)
 
-    # --- Output ---
+def handle_git(config: AppConfig):
+    """Handler for the 'git' command."""
+    prompt = make_git_prompt(staged_only=config.args.staged)
+    output_prompt(prompt, config.args)
+
+def output_prompt(prompt: str, args: argparse.Namespace):
+    """Handles writing the prompt to file or clipboard."""
+    token_count = count_tokens(prompt)
+    print(f"📊 Estimated token count: {token_count:,}")
+    
     if args.copy:
         pyperclip.copy(prompt)
         print(f"✨ Prompt copied to clipboard ({len(prompt):,} chars)")
@@ -484,6 +203,44 @@ def main() -> None:
         args.output.write_text(prompt, encoding="utf-8")
         print(f"✨ Prompt written to {args.output} ({len(prompt):,} chars)")
 
+# ── CLI Entrypoint ────────────────────────────────────────────────────
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="pilot", description="An intelligent context manager for AI assistants.")
+    parser.add_argument("--root", type=Path, default=Path.cwd(), help="Project root (default: cwd)")
+    
+    output_parser = argparse.ArgumentParser(add_help=False)
+    output_parser.add_argument("-o", "--output", type=Path, default="prompt.txt")
+    output_parser.add_argument("-c", "--copy", action="store_true", help="Copy the prompt to the clipboard.")
+
+    sub = parser.add_subparsers(dest="mode", required=True, metavar="{assist,files,git}")
+
+    p_assist = sub.add_parser("assist", help="Build context for a given task.", parents=[output_parser])
+    p_assist.add_argument("task", type=str, help="The high-level task for the AI assistant.")
+    p_assist.add_argument("--ext", nargs="+", default=[".py", ".toml", ".yaml", ".json", ".md", ".sh", ".txt"], help="File extensions to include.")
+    p_assist.add_argument("--threshold", type=int, default=1_000_000, help="Token threshold for interactive mode.")
+    p_assist.set_defaults(func=handle_assist)
+    
+    p_files = sub.add_parser("files", help="Provide specific files to the AI.", parents=[output_parser])
+    p_files.add_argument("files", nargs="+", type=Path, help="File paths relative to --root.")
+    p_files.set_defaults(func=handle_files)
+
+    p_git = sub.add_parser("git", help="Generate a prompt for commit messages.", parents=[output_parser])
+    p_git.add_argument("--staged", action="store_true", help="Analyze only staged changes.")
+    p_git.set_defaults(func=handle_git)
+
+    p_help = sub.add_parser("help", help="Show help for a specific command.")
+    p_help.add_argument("command", nargs="?", choices=["assist", "files", "git"], help="The command to get help for.")
+
+    args = parser.parse_args()
+
+    if args.mode == "help":
+        parsers = {"assist": p_assist, "files": p_files, "git": p_git}
+        target_parser = parsers.get(args.command, parser)
+        target_parser.print_help()
+        sys.exit(0)
+
+    config = AppConfig(root=args.root.resolve(), args=args)
+    args.func(config)
 
 if __name__ == "__main__":
     main()
