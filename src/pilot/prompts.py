@@ -114,7 +114,7 @@ def get_full_context_prompt(task: str, tree: str, all_contents: str) -> str:
         f"Scope Limitation: Only modify files related to the task. Do not refactor unrelated code."
     )
 
-def make_discovery_prompt(task: str, tree: str) -> str:
+def get_discovery_prompt(task: str, tree: str) -> str:
     """
     Generates the initial prompt for large projects, adapting the C.R.A.F.T.E.R.
     framework for an interactive discovery session.
