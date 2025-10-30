@@ -30,7 +30,7 @@ from . import prompts
 DEFAULT_EXT = [".py", ".toml", ".yaml", ".json", ".md", ".sh", ".txt", ".properties", ".html"]
 DEFAULT_IGNORE_DIRS = [".git", "venv", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist", ".eggs"]
 DEFAULT_IGNORE_FILES: List[str] = ["pilot.py", "prompt.txt", "prompts.py"]
-TOKEN_CONVERSION_FACTOR = 1.28
+TOKEN_CONVERSION_FACTOR = 1.3
 
 # ── DATA STRUCTURES ─────────────────────────────────────────────────
 @dataclass
