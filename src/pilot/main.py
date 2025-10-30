@@ -27,6 +27,7 @@ except ImportError:
 from . import prompts
 
 # ── CONFIGURATION ───────────────────────────────────────────────────
+DEFAULT_EXT = [".py", ".toml", ".yaml", ".json", ".md", ".sh", ".txt", ".properties"]
 DEFAULT_IGNORE_DIRS = [".git", "venv", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist", ".eggs"]
 DEFAULT_IGNORE_FILES: List[str] = ["pilot.py", "prompt.txt", "prompts.py"]
 TOKEN_CONVERSION_FACTOR = 1.28
@@ -216,7 +217,7 @@ def main() -> None:
 
     p_assist = sub.add_parser("assist", help="Build context for a given task.", parents=[output_parser])
     p_assist.add_argument("task", type=str, help="The high-level task for the AI assistant.")
-    p_assist.add_argument("--ext", nargs="+", default=[".py", ".toml", ".yaml", ".json", ".md", ".sh", ".txt"], help="File extensions to include.")
+    p_assist.add_argument("--ext", nargs="+", default=DEFAULT_EXT, help="File extensions to include.")
     p_assist.add_argument("--threshold", type=int, default=1_000_000, help="Token threshold for interactive mode.")
     p_assist.set_defaults(func=handle_assist)
     
